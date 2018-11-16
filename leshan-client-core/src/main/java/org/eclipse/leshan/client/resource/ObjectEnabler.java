@@ -24,14 +24,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import org.eclipse.leshan.LwM2mId;
 import org.eclipse.leshan.ResponseCode;
 import org.eclipse.leshan.client.request.ServerIdentity;
+import org.eclipse.leshan.client.servers.ServersInfoExtractor;
 import org.eclipse.leshan.core.model.ObjectModel;
 import org.eclipse.leshan.core.model.ResourceModel;
 import org.eclipse.leshan.core.node.LwM2mObject;
 import org.eclipse.leshan.core.node.LwM2mObjectInstance;
 import org.eclipse.leshan.core.node.LwM2mPath;
 import org.eclipse.leshan.core.node.LwM2mResource;
+import org.eclipse.leshan.core.request.BootstrapDeleteRequest;
 import org.eclipse.leshan.core.request.BootstrapWriteRequest;
 import org.eclipse.leshan.core.request.CreateRequest;
 import org.eclipse.leshan.core.request.DeleteRequest;
@@ -40,6 +43,7 @@ import org.eclipse.leshan.core.request.ObserveRequest;
 import org.eclipse.leshan.core.request.ReadRequest;
 import org.eclipse.leshan.core.request.WriteRequest;
 import org.eclipse.leshan.core.request.WriteRequest.Mode;
+import org.eclipse.leshan.core.response.BootstrapDeleteResponse;
 import org.eclipse.leshan.core.response.BootstrapWriteResponse;
 import org.eclipse.leshan.core.response.CreateResponse;
 import org.eclipse.leshan.core.response.DeleteResponse;
@@ -285,6 +289,43 @@ public class ObjectEnabler extends BaseObjectEnabler {
             return DeleteResponse.success();
         }
         return DeleteResponse.notFound();
+    }
+
+    @Override
+    public BootstrapDeleteResponse doDelete(BootstrapDeleteRequest request) {
+        if (request.getPath().isRoot() || request.getPath().isObject()) {
+            if (id == LwM2mId.SECURITY) {
+                // For security object, we clean everything except bootstrap Server account.
+                Entry<Integer, LwM2mInstanceEnabler> bootstrapServerAccount = null;
+                for (Entry<Integer, LwM2mInstanceEnabler> instance : instances.entrySet()) {
+                    if (ServersInfoExtractor.isBootstrapServer(instance.getValue())) {
+                        bootstrapServerAccount = instance;
+                    }
+                }
+                instances.clear();
+                if (bootstrapServerAccount != null) {
+                    instances.put(bootstrapServerAccount.getKey(), bootstrapServerAccount.getValue());
+                }
+                return BootstrapDeleteResponse.success();
+            } else {
+                instances.clear();
+                return BootstrapDeleteResponse.success();
+            }
+        } else if (request.getPath().isObjectInstance()) {
+            if (id == LwM2mId.SECURITY) {
+                // For security object, deleting bootstrap Server account is not allowed
+                LwM2mInstanceEnabler instance = instances.get(request.getPath().getObjectInstanceId());
+                if (ServersInfoExtractor.isBootstrapServer(instance)) {
+                    return BootstrapDeleteResponse.badRequest("bootstrap server can not be deleted");
+                }
+            }
+            if (null != instances.remove(request.getPath().getObjectInstanceId())) {
+                return BootstrapDeleteResponse.success();
+            } else {
+                return BootstrapDeleteResponse.badRequest(String.format("Instance %s not found", request.getPath()));
+            }
+        }
+        return BootstrapDeleteResponse.badRequest(String.format("unexcepted path %s", request.getPath()));
     }
 
     private void listenInstance(LwM2mInstanceEnabler instance, final int instanceId) {
